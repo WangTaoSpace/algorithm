@@ -1,9 +1,10 @@
 '''
 ID3  信息增益
 C4.5 信息增益/特征的信息熵
-CART分类树基尼指数        ，全集在特征a下，可以被分为D1，D2，D3。。。 那么在A特征下的基尼指数则为，每一部分下的基尼指数和。
+CART分类树 利用基尼指数做最优特征选择和最优切分点选择,终止条件
 
 CART回归树（优化切分成两部分的平方误差和来寻找最佳切分点，所以也叫最小二乘回归树）
+
 '''
 #encoding=utf-8
 import cv2
@@ -11,200 +12,66 @@ import time
 import logging
 import numpy as np
 import pandas as pd
+import math
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 total_class = 10
-
 
 # 二值化
 def binaryzation(img):
     cv_img = img.astype(np.uint8)
     cv_img = cv2.adaptiveThreshold(cv_img, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY, 7, 10)
     return cv_img
-
-# 计算传入数据的Gini指数
-def calcGini(featuresA,label):
-    #获得特征A中可能的取值a
-    label_value = np.unique(label)
-    a = np.unique(featuresA)
-    featuresA_label = zip(featuresA,label)
+#计算最优特征和最优切分点,进行数据集分割
+def calcGini(features,label):
     Ginis = []
+    for i in range(features.shape[1]):
+        GiniA = calcGiniA(features[:, i], label)
+        Ginis.append((i, GiniA[0], GiniA[1]))
+        print(i, GiniA)
+    Ginis = min(Ginis, key=lambda x: x[2]) # 列index 最佳切分点 基尼值
+    # 根据最佳切分点进行数据分割
+    featuresD1 = features[features[:, Ginis[0]] == Ginis[1]]
+    featuresD2 = features[features[:, Ginis[0]] != Ginis[1]]
+    # 删除用过的特征值
+    featuresD1 = np.delete(featuresD1, Ginis[0], axis=1)
+    featuresD2 = np.delete(featuresD2, Ginis[0], axis=1)
+    return featuresD1, featuresD2
+
+# 计算传入特征A的最优切分点
+def calcGiniA(featureA,label):
+    featureA = featureA.astype(np.float64)
+    label = label.astype(np.int)
+    #获得特征A中可能的取值a
+    a = np.unique(featureA)
+    featureA_label = np.vstack((featureA,label)).transpose((1,0))
+    GiniA = []
     for a_cell in a:
-        Ginis_A = []
-        D1 = [cell for cell in featuresA if cell[0] == a_cell]
-        D2 = [cell for cell in featuresA if cell[0] != a_cell]
-
-
-
-
-    y_lables = np.unique(dataSet[: , -1])
-    y_counts=len(dataSet) # y总数据条数
-    y_p={}             # y中每一个分类的概率，字典初始化为空，y分类数是不定的，按字典存储更方便取值
-    gini=1.0
-    for y_lable in y_lables:
-        y_p[y_lable]=len(dataSet[dataSet[:, -1]==y_lable])/y_counts  # y中每一个分类的概率（其实就是频率）
-        gini-=y_p[y_lable]**2
-    return gini
-
-
-
-class Tree(object):
-    def __init__(self,node_type,Class = None, feature = None):
-        self.node_type = node_type
-        self.dict = {}
-        self.Class = Class
-        self.feature = feature
-
-    def add_tree(self,val,tree):
-        self.dict[val] = tree
-
-    def predict(self,features):
-        if self.node_type == 'leaf':
-            return self.Class
-
-        tree = self.dict[features[self.feature]]
-        return tree.predict(features)
-
-def calc_ent(x):
-    """
-        calculate shanno ent of x
-    """
-
-    x_value_list = set([x[i] for i in range(x.shape[0])])
-    ent = 0.0
-    for x_value in x_value_list:
-        p = float(x[x == x_value].shape[0]) / x.shape[0]
-        logp = np.log2(p)
-        ent -= p * logp
-
-    return ent
-
-def calc_condition_ent(x, y):
-    """
-        calculate ent H(y|x)
-    """
-
-    # calc ent(y|x)
-    x_value_list = set([x[i] for i in range(x.shape[0])])
-    ent = 0.0
-    for x_value in x_value_list:
-        sub_y = y[x == x_value]
-        temp_ent = calc_ent(sub_y)
-        ent += (float(sub_y.shape[0]) / y.shape[0]) * temp_ent
-
-    return ent
-
-def calc_ent_grap(x,y):
-    """
-        calculate ent grap
-    """
-
-    base_ent = calc_ent(y)
-    condition_ent = calc_condition_ent(x, y)
-    ent_grap = base_ent - condition_ent
-
-    return ent_grap
-
-def recurse_train(train_set,train_label,features,epsilon):
-    global total_class
-
-    LEAF = 'leaf'
-    INTERNAL = 'internal'
-
-    # 步骤1——如果train_set中的所有实例都属于同一类Ck
-    label_set = set(train_label)
-    if len(label_set) == 1:
-        return Tree(LEAF,Class = label_set.pop())
-
-    # 步骤2——如果features为空
-    (max_class,max_len) = max([(i,len(filter(lambda x:x==i,train_label))) for i in range(total_class)],key = lambda x:x[1])
-
-    if len(features) == 0:
-        return Tree(LEAF,Class = max_class)
-
-    # 步骤3——计算信息增益
-    max_feature = 0
-    max_gda = 0
-
-    D = train_label
-    HD = calc_ent(D)
-    for feature in features:
-        A = np.array(train_set[:,feature].flat)
-        gda = HD - calc_condition_ent(A,D)
-
-        if gda > max_gda:
-            max_gda,max_feature = gda,feature
-
-    # 步骤4——小于阈值
-    if max_gda < epsilon:
-        return Tree(LEAF,Class = max_class)
-
-    # 步骤5——构建非空子集
-    sub_features = filter(lambda x:x!=max_feature,features)
-    tree = Tree(INTERNAL,feature=max_feature)
-
-    feature_col = np.array(train_set[:,max_feature].flat)
-    feature_value_list = set([feature_col[i] for i in range(feature_col.shape[0])])
-    for feature_value in feature_value_list:
-
-        index = []
-        for i in range(len(train_label)):
-            if train_set[i][max_feature] == feature_value:
-                index.append(i)
-
-        sub_train_set = train_set[index]
-        sub_train_label = train_label[index]
-
-        sub_tree = recurse_train(sub_train_set,sub_train_label,sub_features,epsilon)
-        tree.add_tree(feature_value,sub_tree)
-
-    return tree
-
-@log
-def train(train_set,train_label,features,epsilon):
-    return recurse_train(train_set,train_label,features,epsilon)
-
-@log
-def predict(test_set,tree):
-
-    result = []
-    for features in test_set:
-        tmp_predict = tree.predict(features)
-        result.append(tmp_predict)
-    return np.array(result)
-
-
+        D1 = featureA_label[featureA_label[:,0] == a_cell]
+        D2 = featureA_label[featureA_label[:,0] != a_cell]
+        _, D1 = np.unique(D1[:,1],return_counts=True)
+        _, D2 = np.unique(D2[:,1],return_counts=True)
+        D1_sums = np.sum(D1)
+        D2_sums = np.sum(D2)
+        D1 = 1- np.sum(np.power(D1/D1_sums,2))
+        D2 = 1- np.sum(np.power(D2/D2_sums,2))
+        GiniA_a = (D1_sums*D1)/(D1_sums+ D2_sums) + (D2_sums*D2)/(D1_sums+ D2_sums)
+        GiniA.append((a_cell,GiniA_a))
+    return min(GiniA, key=lambda x: x[1])  # 根据基尼指数输出最优切分点
 
 if __name__ == '__main__':
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-
-    raw_data = pd.read_csv('../data/train.csv',header=0)
+    print('Start read data')
+    raw_data = pd.read_csv('../data/train.csv', header=0)
     data = raw_data.values
-
-    imgs = data[0::,1::]
-    labels = data[::,0]
-
-    # 图片二值化
-    features = binaryzation_features(imgs)
-
-    # 选取 2/3 数据作为训练集， 1/3 数据作为测试集
-    train_features, test_features, train_labels, test_labels = train_test_split(features, labels, test_size=0.33, random_state=23323)
-
-    tree = train(train_features,train_labels,[i for i in range(784)],0.1)
-    test_predict = predict(test_features,tree)
-    score = accuracy_score(test_labels,test_predict)
-
-    print("The accruacy socre is ", score)
-
-
-
-
-
-
-
-
-
+    imgs = data[:, 1:]
+    labels = data[:, 0]
+    features = imgs
+    # features = binaryzation(imgs)
+    # 选取 4/5 数据作为训练集， 1/5 数据作为测试集
+    train_features, test_features, train_labels, test_labels = train_test_split(
+        features, labels, test_size=0.2)
+    # 开始计算最优特征和切分点
+    featureD1, featureD2 = calcGini(train_features, train_labels)
 
 
