@@ -35,6 +35,7 @@ class CART_CL:
     def __init__(self,epsilon= 1e-3, min_sample=1):
         self.epsilon = epsilon
         self.min_sample = min_sample # 叶节点含有的最少样本数
+        self.gini = 1  # 上一个基尼值，为了求解基尼值的下降
         self.tree = None
 
     #计算最优特征和最优切分点,进行数据集分割
@@ -49,11 +50,12 @@ class CART_CL:
 
         D1 = features_label[features_label[:, Ginis[0]] == Ginis[1]]
         D2 = features_label[features_label[:, Ginis[0]] != Ginis[1]]
-        features_D1, label_D1 = D1[:-1], D1[-1]
-        features_D2, label_D2 = D2[:-1], D2[-1]
+        print(D1.shape,D2.shape)
+        features_D1, label_D1 = D1[:, :-1], D1[:, -1]
+        features_D2, label_D2 = D2[:, :-1], D2[:, -1]
         res1 = Counter(label_D1).most_common(1)[0][0]
         res2 = Counter(label_D2).most_common(1)[0][0]
-        print(Ginis)
+
         return (features_D1, label_D1, res1), (features_D2, label_D2, res2), Ginis
 
     # 计算传入特征A的最优切分点
@@ -67,6 +69,8 @@ class CART_CL:
         for a_cell in a:
             D1 = featureA_label[featureA_label[:,0] == a_cell]
             D2 = featureA_label[featureA_label[:,0] != a_cell]
+            if D1.shape[0] < 1 or D2.shape[0] < 1:  #消除切分后某一方为空的情况
+                continue
             _, D1 = np.unique(D1[:,1],return_counts=True)
             _, D2 = np.unique(D2[:,1],return_counts=True)
             D1_sums = np.sum(D1)
@@ -75,20 +79,39 @@ class CART_CL:
             D2 = 1- np.sum(np.power(D2/D2_sums,2))
             GiniA_a = (D1_sums*D1)/(D1_sums+ D2_sums) + (D2_sums*D2)/(D1_sums+ D2_sums)
             GiniA.append((a_cell,GiniA_a))
-        return min(GiniA, key=lambda x: x[1])  # 根据基尼指数输出最优切分点
+        try:
+            return min(GiniA, key=lambda x: x[1])  # 根据基尼指数输出最优切分点
+        except:
+            return (1, 1)  # 该特征不能进行切分，输出特殊值
 
     def buildTree(self, features, labels, gini = 1):
-        if labels.shape[0] < self.min_sample: # 数据集小于阈值直接设置为叶节点
+        if labels.shape[0] <= self.min_sample: # 数据集小于阈值直接设置为叶节点
             return node(res=Counter(labels).most_common(1)[0][0])
-        (features_D1, label_D1, res1), (features_D2, label_D2, res2), Ginis = self.calcGini(features,labels)
-        if gini - Ginis[2] < self.epsilon:  # 如果基尼指数的下降值小于阈值，直接返回成叶节点
+        (features_D1, label_D1, res1), (features_D2, label_D2, res2), Ginis = self.calcGini(features, labels)
+        if gini - Ginis[2] <= self.epsilon:  # 如果基尼指数的下降值小于阈值，直接返回成叶节点
             return node(res=Counter(labels).most_common(1)[0][0])
         else:
-            left = self.buildTree(features_D1,label_D1,res1,Ginis[2])
-            right = self.buildTree(features_D2,label_D2,res2,Ginis[2])
+            left = self.buildTree(features_D1,label_D1, Ginis[2])
+            right = self.buildTree(features_D2,label_D2, Ginis[2])
             return node(feature=Ginis[0],val=Ginis[1],right = right, left = left)
     def fit(self,features,labels):
         self.tree = self.buildTree(features,labels)
+
+    def predict(self,features):
+        result = []
+        def helper(x, tree):
+            if tree.res is not None: # 表明到达了叶子节点
+                return tree.res
+            else:
+                if x[tree.feature] == tree.val:
+                    branch = tree.left
+                else:
+                    branch = tree.right
+                return helper(x,branch)
+        for cell in features:
+            result.append(helper(cell,self.tree))
+        return np.array(result)
+
 
     def disp_tree(self):
         # 打印树
@@ -96,7 +119,7 @@ class CART_CL:
         return
     def disp_helper(self, current_node):
         # 前序遍历
-        print(current_node.fea, current_node.val, current_node.res)
+        print(current_node.feature, current_node.val, current_node.res)
         if current_node.res is not None:
             return
         self.disp_helper(current_node.left)
@@ -113,12 +136,15 @@ if __name__ == '__main__':
     # features = binaryzation(imgs)
     # 选取 4/5 数据作为训练集， 1/5 数据作为测试集
     train_features, test_features, train_labels, test_labels = train_test_split(
-        features, labels, test_size=0.9)
+        features, labels, test_size=0.3)
     print(train_features.shape,train_labels.shape)
     print("start building tree")
-    cart = CART_CL()
+    cart = CART_CL(min_sample=2)
     cart.fit(train_features,train_labels)
+    print("end building tree")
+    print("print tree")
     print(cart.disp_tree())
-
-
-
+    print("start predict")
+    test_predict = cart.predict(test_features)
+    score = accuracy_score(test_labels,test_predict)
+    print("score:",score)
